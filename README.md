@@ -86,6 +86,18 @@ Every block is now editable. Click to edit, use the toolbar to insert/delete/reo
 
 When you're done, stop both servers — annotations are cleaned up automatically.
 
+## Remote editing (mobile, another machine)
+
+Run a tunnel to your save server so you can edit from any device on the same network or remotely:
+
+```bash
+# In a third terminal, tunnel port 9999
+bunx traforo -p 9999
+# → https://something.traforo.dev
+```
+
+Open that URL from your phone, tablet, or another computer — you get the full editing UI with saves going through the same tunnel back to local `.md` files. Both page traffic and `/save` POSTs use the same origin, so no CORS issues.
+
 ## AI agent integration
 
 An AI coding agent (Hermes, Claw, etc.) can automate setup and teardown. The only information needed is your SSG type and content directory:
