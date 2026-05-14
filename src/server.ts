@@ -4,7 +4,35 @@
  */
 
 import fs from "node:fs";
+import { resolve } from "node:path";
 import { Config } from "./types.js";
+
+// --- Dynamic client compilation (bun build at startup) ---
+
+/** Compile `client.ts` → JS using `bun build`. Cached once per server start. */
+let compiledClient: Uint8Array | null = null;
+let compiledClientError: Error | null = null;
+
+function compileClientScript(): void {
+  const pkgRoot = resolve(import.meta.dirname, "..");
+  const proc = Bun.spawnSync({
+    cmd: [process.execPath, "build", "--target=browser", "--format=iife", "--no-bundle", "./src/client.ts"],
+    cwd: pkgRoot,
+  });
+  if (proc.stdout && proc.stdout.length > 0) {
+    compiledClient = proc.stdout;
+  } else {
+    const errText = new TextDecoder().decode(proc.stderr || new Uint8Array());
+    compiledClientError = new Error(`Client compile failed: ${errText}`);
+  }
+}
+
+// Compile at import time (not request time) so errors surface immediately.
+try {
+  compileClientScript();
+} catch (e) {
+  compiledClientError = e instanceof Error ? e : new Error(String(e));
+}
 import { Indexer } from "./indexer.js";
 import { injectUneditableBanner, injectHtmxShells, injectHtmxClient } from "./inject.js";
 import { handleSave, handleSource, corsHeaders } from "./save.js";
@@ -72,16 +100,11 @@ export function createSaveHandler(
   if (!cfg.backendProxyUrl) {
     return async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
-      // Serve compiled client script
+      // Serve client script — compiled from src/client.ts at startup via bun build
       if (url.pathname === "/mb-client.js") {
-        const clientJs = fs.readFileSync(
-          new URL("../dist/client.js", import.meta.url),
-          "utf-8"
-        );
-        return new Response(clientJs, {
-          headers: {
-            "Content-Type": "text/javascript; charset=utf-8",
-          },
+        if (!compiledClient) return new Response(compiledClientError?.message ?? "Client compile failed", { status: 500 });
+        return new Response(compiledClient, {
+          headers: { "Content-Type": "text/javascript; charset=utf-8" },
         });
       }
 
@@ -109,16 +132,11 @@ export function createSaveHandler(
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
-    // Serve compiled client script
+    // Serve client script — compiled from src/client.ts at startup via bun build
     if (url.pathname === "/mb-client.js") {
-      const clientJs = fs.readFileSync(
-        new URL("../dist/client.js", import.meta.url),
-        "utf-8"
-      );
-      return new Response(clientJs, {
-        headers: {
-          "Content-Type": "text/javascript; charset=utf-8",
-        },
+      if (!compiledClient) return new Response(compiledClientError?.message ?? "Client compile failed", { status: 500 });
+      return new Response(compiledClient, {
+        headers: { "Content-Type": "text/javascript; charset=utf-8" },
       });
     }
 
