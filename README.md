@@ -1,16 +1,22 @@
 ---
 title: "markdown-blocks"
-description: "Block-level Markdown editing API with client-side integration"
+description: "Block-level in-browser editing for static Markdown sites"
 draft: false
 ---
 
-# = markdown-blocks
+# markdown-blocks
 
 Bun runtime package that adds block-level in-browser editing to any static Markdown site. Server assigns stable block IDs from source file line numbers, client sends edits back by block ID.
 
 ## How it works
 
-The server intercepts page requests and injects `data-block-id` attributes into HTML elements. The client listens on those elements, collects edits, and POSTs them to `/save`.
+The save server sits between the browser and your static site generator (Zola, Hugo, Jekyll, etc.) as a reverse proxy. On every page request it:
+
+1. **Proxies** the HTML from your SSG
+2. **Wraps** each markdown block with HTMX shell markup using comment anchors injected during build
+3. **Injects** HTMX (CDN), editing CSS, and the client module — all automatically
+
+The client module activates event delegation: clicking a block toggles edit mode, toolbar buttons (insert/delete/move) post to `/save`, and changes are persisted back to source `.md` files on blur.
 
 ```
 Browser                    Save Server                     Static Site Backend
@@ -18,61 +24,75 @@ Browser                    Save Server                     Static Site Backend
    |-- GET /about ------------->|                                   |
    |                            |-- GET /about -------------------->|
    |                            |<-- HTML -------------------------|
-   |                            |  [inject data-block-id]           |
-   |<- HTML with block IDs -----|                                   |
-   |   user edits heading ...   |                                   |
+   |                            |  [wrap blocks + inject HTMX]      |
+   |<- HTML with editing UI ----|                                   |
+   |   user clicks block ...    |                                   |
    |-- POST /save {blockId,...}-|-> writes to source .md file       |
    |<-- {ok:true, msg:"updated"}|                                   |
 ```
 
-## API
+## Quick start
 
-### Server (Bun runtime)
+### CLI (recommended)
+
+```bash
+bunx markdown-blocks-server \
+  --content-dir site/content \
+  --preset zola \
+  --port 9999 \
+  --proxy http://localhost:1112 \
+  --path-map '{"/_index.md":"/","/about/":"about.md"}'
+```
+
+The server reads `--content-dir`, annotates markdown files with block anchor comments on startup, and cleans them up on shutdown. Use `--preset` for SSG-specific content selectors and line counting (currently supports `generic`, `zola`, `hugo`).
+
+### Programmatic
 
 ```ts
-import { createSaveHandler } from 'markdown-blocks';
+import { createSaveHandler } from 'markdown-blocks/server';
 
 const handler = createSaveHandler({
-  contentDir: '/path/to/markdown/files',     // directory containing .md source files
+  contentDir: '/path/to/markdown/files',
+  preset: 'zola',
   pathMap: {
-    // URL path → filename inside contentDir
     '/':        '_index.md',
     '/about/':  'about.md',
   },
-  backendProxyUrl: 'http://localhost:1112',   // your static site dev server
+  backendProxyUrl: 'http://localhost:1112',   // your SSG dev server
 });
 
 Bun.serve({ port: 9999, fetch: handler });
 ```
 
-`createSaveHandler` returns a standard `fetch(req) => Response` handler. It handles `/save` (block-level and full-content saves), CORS preflight, and proxying all other requests to your backend with block ID injection.
+`createSaveHandler` returns a standard `fetch(req) => Response` handler. It handles `/save`, `/source`, CORS preflight, and proxying all other requests to your backend with block ID injection. The client JavaScript is compiled from TypeScript at startup via `bun build` — no separate build step required.
 
-### Client (vanilla JS, no dependencies)
+### Installation (without npm publish)
 
-Add this script to every page served through the save server:
-
-```html
-<script>
-var main = document.querySelector('main') || document.body;
-function debounce(fn, ms){ var t; return function(){ clearTimeout(t); t=setTimeout(fn.bind(this), ms) }; }
-main.querySelectorAll('h1,h2,h3,h4,h5,h6,p').forEach(function(block){
-  var id = block.getAttribute('data-block-id');
-  if (!id) return;
-  block.setAttribute('contenteditable', 'true');
-  block.addEventListener('input', debounce(function(){
-    fetch('/save', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ path:'[[ page.path ]]', blockId: id, text: block.innerText })
-    })
-  }, 300));
-});
-</script>
+```json
+{
+  "dependencies": {
+    "markdown-blocks": "github:gtrak/markdown-blocks"
+  }
+}
 ```
 
-Replace `[[ page.path ]]` with the actual URL path. Each template language has its own syntax:
-- **Zola**: `{{ page.path }}`
-- **Hugo**: `.RelPermalink` or `.Page.Permalink` (trimmed)
-- **Jekyll**: `{{ page.url }}`
+Run `bun install` and Bun resolves the git URL automatically, pinning to a commit hash in `bun.lock`.
+
+## Client injection (automatic)
+
+You do **not** need to add any client code to your templates. The server injects everything:
+
+- **HTMX CDN** (`<script src="https://unpkg.com/htmx.org@2.0.4">`) before `</head>`
+- **Editing CSS** (block borders, toolbar buttons, save indicator) before `</head>`
+- **Client module** (`<script type="module" src="/mb-client.js">`) which is compiled from `src/client.ts` at server startup
+
+The client activates via event delegation — clicking within a `.mb-block` toggles edit mode, and the floating toolbar handles insert/delete/move/delete operations through HTMX requests to `/save`.
+
+## Named exports
+
+| Export | Path | Description |
+|--------|------|-------------|
+| `createSaveHandler` | `markdown-blocks/server` | Server factory function |
 
 ## Save formats
 
