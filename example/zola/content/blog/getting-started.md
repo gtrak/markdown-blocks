@@ -1,4 +1,4 @@
----
++++
 title = "Getting Started with Markdown Blocks"
 date = 2025-06-15
 description = "How to use markdown-blocks for inline editing"
@@ -8,7 +8,7 @@ tags = ["tutorial", "blocks"]
 
 [sitemap]
 priority = 0.9
----
++++
 
 ## Prerequisites
 

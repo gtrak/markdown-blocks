@@ -1,10 +1,10 @@
----
++++
 title = "Home"
 
 [sitemap]
   changefreq = "daily"
   priority = 1.0
----
++++
 
 Welcome to the markdown-blocks Zola demo. This page shows how inline editing works with Zola's dev server and the markdown-blocks save server.
 
