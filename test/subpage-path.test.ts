@@ -271,12 +271,14 @@ describe("regression: consistent path across all action types", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: compiled client.js actually contains the fix (smoke test)
+// Tests: client source actually contains the fix (smoke test)
 // ---------------------------------------------------------------------------
 
-describe("compiled dist/client.js contains the fix", () => {
-  test("client.js reads path from hx-vals instead of hardcoding", () => {
-    const content = fs.readFileSync("dist/client.js", "utf-8");
+describe("client source contains the path-from-hx-vals fix", () => {
+  const clientPath = "src/client.ts";
+
+  test("reads path from hx-vals instead of hardcoding", () => {
+    const content = fs.readFileSync(clientPath, "utf-8");
 
     // Behavioral check: code reads hx-vals and parses .path attribute,
     // rather than hardcoding a literal path in action payloads.
@@ -285,8 +287,8 @@ describe("compiled dist/client.js contains the fix", () => {
     expect(content).toMatch(/\.path/);
   });
 
-  test("client.js reads hx-vals for path derivation", () => {
-    const content = fs.readFileSync("dist/client.js", "utf-8");
+  test("reads hx-vals for path derivation", () => {
+    const content = fs.readFileSync(clientPath, "utf-8");
     expect(content).toMatch(/hx-vals/);
   });
 });
