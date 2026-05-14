@@ -34,6 +34,8 @@ function parseArgs(argv: string[]): void {
       cfg.port = parseInt(argv[++i], 10);
     } else if (arg === "--proxy" && i + 1 < argv.length) {
       cfg.backendProxyUrl = argv[++i];
+    } else if (arg === "--pid-dir" && i + 1 < argv.length) {
+      cfg.pidDir = argv[++i];
     } else if (arg === "--path-map" && i + 1 < argv.length) {
       try {
         cfg.pathMap = JSON.parse(argv[++i]);
