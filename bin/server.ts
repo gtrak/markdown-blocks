@@ -10,6 +10,8 @@
 
 import { createSaveHandler } from "../src/server.ts";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 function parseArgs(argv: string[]): void {
   const cfg: {
@@ -18,6 +20,7 @@ function parseArgs(argv: string[]): void {
     port?: number;
     backendProxyUrl?: string;
     pathMap?: Record<string, string>;
+    pidDir?: string;
   } = {};
 
   let i = 0;
@@ -47,6 +50,7 @@ Options:
   --port <n>            Save server port (default: 9999)
   --proxy <url>         Backend dev server URL to proxy
   --path-map <json>     JSON object mapping URL paths to filenames
+  --pid-dir <dir>       Directory for PID file (default: /tmp/markdown-blocks-<port>)
   --help, -h            Show this help
 `);
       process.exit(0);
@@ -64,13 +68,18 @@ Options:
 
   const port = cfg.port ?? 9999;
   const preset = cfg.preset ?? "generic";
+  // PID dir: explicit arg > env var > temp default
+  const pidDir = cfg.pidDir
+    ?? process.env.MARKDOWN_BLOCKS_PID_DIR
+    ?? path.join(os.tmpdir(), `markdown-blocks-${port}`);
 
   console.log(`markdown-blocks save server on :${port} (preset: ${preset})`);
 
   // Write PID file for process management
   try {
-    fs.mkdirSync(".slop", { recursive: true });
-    fs.writeFileSync(".slop/site-save.pid", process.pid.toString());
+    fs.mkdirSync(pidDir, { recursive: true });
+    const pidFile = path.join(pidDir, "site-save.pid");
+    fs.writeFileSync(pidFile, process.pid.toString());
   } catch {}
 
   const handler = createSaveHandler({
@@ -83,7 +92,7 @@ Options:
   Bun.serve({ port, hostname: "0.0.0.0", fetch: handler });
 
   function cleanup() {
-    try { fs.unlinkSync(".slop/site-save.pid"); } catch {}
+    try { fs.unlinkSync(path.join(pidDir, "site-save.pid")); } catch {}
   }
   process.on("SIGTERM", () => { cleanup(); process.exit(0); });
   process.on("SIGINT", () => { cleanup(); process.exit(0); });
