@@ -1,0 +1,12 @@
+
+{{ define "main" }}
+<div class="home">
+  <p>Welcome to the markdown-blocks demo site.</p>
+  <h2>Recent Posts</h2>
+  <ul>
+    {{ range where .Site.RegularPages "Section" "blog" }}
+    <li><a href="{{ .RelPermalink }}">{{ .Title }}</a></li>
+    {{ end }}
+  </ul>
+</div>
+{{ end }}

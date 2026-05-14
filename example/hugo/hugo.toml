@@ -1,0 +1,13 @@
+baseURL = "http://localhost:1313/"
+title = "Markdown Blocks Demo"
+languageCode = "en-us"
+
+[module]
+  # markdown-blocks runs as a separate proxy/dev server — no Hugo module needed
+
+[params]
+  # Custom params for reference
+  description = "Demo site using markdown-blocks editor with Hugo"
+
+[taxonomies]
+  tag = "tags"

@@ -1,0 +1,37 @@
+{
+  "name": "markdown-blocks",
+  "version": "0.1.0",
+  "dependencies": {
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-frontmatter": "^2.0.1",
+    "mdast-util-to-markdown": "^2.1.2",
+    "parse5": "^8.0.1",
+    "yaml": "^2.8.4"
+  },
+  "exports": {
+    "./server": {
+      "import": "./src/server.ts",
+      "types": "./src/server.ts"
+    }
+  },
+  "description": "Block-level in-browser editing for static Markdown sites",
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "license": "MIT",
+  "bin": {
+    "markdown-blocks-server": "./bin/server.ts"
+  },
+  "scripts": {
+    "test": "bun test test/save.test.ts"
+  },
+  "devDependencies": {
+    "markdown-it": "^14.1.1",
+    "puppeteer": "^24.43.1"
+  }
+}

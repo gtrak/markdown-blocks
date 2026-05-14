@@ -1,0 +1,27 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ block "title" . }}{{ .Site.Title }}{{ end }}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    a { color: #06b6d4; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header><h1><a href="{{ "/" | relURL }}">{{ .Site.Title }}</a></h1></header>
+  <main>{{ block "main" . }}{{ end }}</main>
+  {{ if .Content }}
+  <div class="post-footer">
+    <small>Back to <a href="{{ "/" | relURL }}">home</a></small>
+  </div>
+  {{ end }}
+
+<!-- markdown-blocks dev server (uncomment when running) -->
+<!--
+<script src="/mb/client.js"></script>
+-->
+</body>
+</html>
