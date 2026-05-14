@@ -4,6 +4,7 @@ import { toMarkdown } from "mdast-util-to-markdown";
 import { frontmatter as micromarkFrontmatter } from "micromark-extension-frontmatter";
 import type { Root, Node } from "mdast-util-from-markdown/lib";
 import * as yaml from "yaml";
+import { parse as parseToml } from "smol-toml";
 import { Block, BlockId } from "./types.js";
 
 // --- Parser helpers ---
@@ -27,6 +28,11 @@ function serialize(tree: Node): string {
   return toMarkdown(tree, serializeOptions);
 }
 
+/** Normalize CRLF to LF so the AST pipeline always works with uniform line endings. */
+function normalizeEol(source: string): string {
+  return source.replace(/\r\n/g, "\n");
+}
+
 // --- Frontmatter extraction ---
 
 /**
@@ -36,6 +42,7 @@ function serialize(tree: Node): string {
  * and parsed key-value pairs.
  */
 export function extractFrontmatter(source: string): { fm: string | null; content: string; parsed: Record<string, unknown> } {
+  source = normalizeEol(source);
   const tree = parse(source);
   const fmNode = tree.children.find(c => c.type === "yaml" || c.type === "toml");
 
@@ -51,25 +58,9 @@ export function extractFrontmatter(source: string): { fm: string | null; content
     if (fmNode.type === "yaml") {
       parsed = yaml.parse((fmNode as unknown as { value: string }).value) || {};
     } else {
-      // TOML: simple key = value parsing — Zola uses basic types in frontmatter
+      // TOML: use smol-toml for proper parsing
       const nodeValue = (fmNode as unknown as { value: string }).value;
-      for (const line of nodeValue.split("\n")) {
-        const t = line.trim();
-        if (!t || t.startsWith("#")) continue;
-        const idx = t.indexOf("=");
-        if (idx > 0) {
-          const key = t.slice(0, idx).trim();
-          let val: unknown = t.slice(idx + 1).trim();
-          if (typeof val === "string") {
-            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-              val = val.slice(1, -1);
-            } else if (val === "true") { val = true; }
-            else if (val === "false") { val = false; }
-            else if (/^-?\d+$/.test(val)) { val = parseInt(val, 10); }
-          }
-          parsed[key] = val;
-        }
-      }
+      parsed = parseToml(nodeValue) || {};
     }
     if (typeof parsed !== "object" || parsed === null) parsed = {};
   } catch {
@@ -150,6 +141,7 @@ function collectBlocks(node: Root | Node): Block[] {
  * Recognizes and skips both YAML (---) and TOML (+++) frontmatter.
  */
 export function parseBlocks(source: string): Block[] {
+  source = normalizeEol(source);
   const tree = parse(source);
   return collectBlocks(tree);
 }
@@ -172,6 +164,7 @@ function composeMarkdown(tag: string, text: string): string {
 
 /** Replace a specific block in the source by its tag+index. */
 export function replaceBlock(source: string, blockId: BlockId, newText: string): { result: string; success: boolean } {
+  source = normalizeEol(source);
   const blocks = parseBlocks(source);
   const target = blocks.find(b => b.tag === blockId.tag && b.index === blockId.index);
   if (!target) return { result: source, success: false };
@@ -202,6 +195,7 @@ export function replaceBlock(source: string, blockId: BlockId, newText: string):
 
 /** Delete a specific block in the source by its tag+index. */
 export function deleteBlock(source: string, blockId: BlockId): { result: string; success: boolean } {
+  source = normalizeEol(source);
   const blocks = parseBlocks(source);
   const target = blocks.find(b => b.tag === blockId.tag && b.index === blockId.index);
   if (!target) return { result: source, success: false };
@@ -229,6 +223,7 @@ export function deleteBlock(source: string, blockId: BlockId): { result: string;
  * Insert a new block after the block identified by afterBlockId.
  */
 export function insertBlock(source: string, afterBlockId: BlockId, tag: string, text: string): { result: string; success: boolean } {
+  source = normalizeEol(source);
   const blocks = parseBlocks(source);
   const afterBlock = blocks.find(b => b.tag === afterBlockId.tag && b.index === afterBlockId.index);
   if (!afterBlock) return { result: source, success: false };
@@ -249,6 +244,7 @@ export function insertBlock(source: string, afterBlockId: BlockId, tag: string, 
  * Move a block to a new position. If beforeBlockId is null, append to end of root children.
  */
 export function moveBlock(source: string, blockId: BlockId, beforeBlockId: BlockId | null): { result: string; success: boolean } {
+  source = normalizeEol(source);
   const blocks = parseBlocks(source);
   const srcTarget = blocks.find(b => b.tag === blockId.tag && b.index === blockId.index);
   if (!srcTarget) return { result: source, success: false };
@@ -314,6 +310,7 @@ export function moveBlockByDirection(
   blockId: BlockId,
   direction: "up" | "down",
 ): { result: string; success: boolean } {
+  source = normalizeEol(source);
   const blocks = parseBlocks(source);
   const idx = blocks.findIndex((b) => b.tag === blockId.tag && b.index === blockId.index);
   if (idx === -1) return { result: source, success: false };

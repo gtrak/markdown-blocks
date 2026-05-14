@@ -9,6 +9,15 @@ export function parseFrontmatterFromContent(content: string): Record<string, unk
   return extractFmAst(content).parsed;
 }
 
+// --- Custom preset registry ---
+
+const customPresets = new Map<string, Preset>();
+
+/** Register a custom preset at runtime. */
+export function registerPreset(name: string, preset: Preset): void {
+  customPresets.set(name, preset);
+}
+
 // --- Preset registry ---
 
 /**
@@ -272,6 +281,9 @@ export const AVAILABLE_PRESETS = ["zola", "hugo", "jekyll", "generic"] as const;
 
 /** Get a preset by name. Throws if unknown. Supports "zola", "hugo", "jekyll", and "generic". */
 export function getPreset(name: string): Preset {
+  // Check custom presets first
+  if (customPresets.has(name)) return customPresets.get(name)!;
+
   // Lazily create with trailingSlash=true as default
   if (!PRESETS[name]) {
     switch (name) {

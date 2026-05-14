@@ -9,6 +9,7 @@
  */
 
 import { createSaveHandler } from "../src/server.ts";
+import { Config } from "../src/types.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -84,20 +85,25 @@ Options:
     fs.writeFileSync(pidFile, process.pid.toString());
   } catch {}
 
-  const handler = createSaveHandler({
-    contentDir: cfg.contentDir,
+  const serverConfig: Config = {
+    contentDir: cfg.contentDir!,
     preset,
+    trailingSlash: true,
     backendProxyUrl: cfg.backendProxyUrl,
     pathMap: cfg.pathMap,
-  });
+  };
+
+  const { handler, cleanup } = createSaveHandler(serverConfig);
 
   Bun.serve({ port, hostname: "0.0.0.0", fetch: handler });
 
-  function cleanup() {
+  function onShutdown() {
     try { fs.unlinkSync(path.join(pidDir, "site-save.pid")); } catch {}
+    cleanup();
+    process.exit(0);
   }
-  process.on("SIGTERM", () => { cleanup(); process.exit(0); });
-  process.on("SIGINT", () => { cleanup(); process.exit(0); });
+  process.on("SIGTERM", onShutdown);
+  process.on("SIGINT", onShutdown);
 }
 
 parseArgs(Bun.argv.slice(2));

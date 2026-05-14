@@ -11,8 +11,6 @@ export function initMarkdownBlocks(): void {
     indicator.textContent = 'Saved';
     document.body.appendChild(indicator);
 
-    window.__scriptExecuted = true;
-
     // -----------------------------------------------------------------------
     // 1. Click delegation — manage .mb-editing class for toolbar visibility
     // -----------------------------------------------------------------------

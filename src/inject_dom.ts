@@ -144,6 +144,15 @@ export function replaceParent(
   return true;
 }
 
+/** Insert a new node into a parent before a reference node. */
+export function insertBefore(
+  parent: parse5.ParentNode,
+  newNode: parse5.Node,
+  referenceNode: parse5.Node,
+): void {
+  T.insertBefore(parent, newNode, referenceNode);
+}
+
 // ---------------------------------------------------------------------------
 // Child collection
 // ---------------------------------------------------------------------------

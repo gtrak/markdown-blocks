@@ -6,6 +6,7 @@
     "mdast-util-frontmatter": "^2.0.1",
     "mdast-util-to-markdown": "^2.1.2",
     "parse5": "^8.0.1",
+    "smol-toml": "^1.6.1",
     "yaml": "^2.8.4"
   },
   "exports": {
@@ -31,6 +32,7 @@
     "test": "bun test test/save.test.ts"
   },
   "devDependencies": {
+    "happy-dom": "^20.9.0",
     "markdown-it": "^14.1.1",
     "puppeteer": "^24.43.1"
   }

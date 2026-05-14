@@ -119,12 +119,7 @@ describe("initMarkdownBlocks — save indicator", () => {
         expect(q("#save-indicator")?.textContent).toBe("Saved");
     });
 
-    test("sets window.__scriptExecuted to true", async () => {
-        const init = await getInit();
-        init();
-        expect(globalThis.window.__scriptExecuted).toBe(true);
-    });
-});
+ });
 
 // ---------------------------------------------------------------------------
 // Tests — click delegation

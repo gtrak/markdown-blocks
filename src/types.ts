@@ -58,6 +58,8 @@ export interface Config {
   backendProxyUrl?: string;        // optional proxy target
   pathMap?: Record<string, string>;// manual URL→filepath overrides
   contentSelector?: string;        // HTML selector for editable area (default: "main")
+  /** How HTMX is served: "cdn" (default) or "bundled" (served locally) */
+  htmxSource?: "cdn" | "bundled";
 }
 
 // --- Preset ---

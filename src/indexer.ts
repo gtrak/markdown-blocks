@@ -54,6 +54,7 @@ export class Indexer {
   private watchHandle: ReturnType<typeof setInterval> | null = null;
   private fsWatchers: fs.FSWatcher[] = [];
   private onChangeCallback: (() => void) | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config: Config) {
     this.config = config;
@@ -82,6 +83,8 @@ export class Indexer {
 
   /** Set up file watcher that rebuilds the index on .md file changes. */
   watch(onChange: () => void): void {
+    // Clean up any existing watchers first (idempotent)
+    this.stopWatch();
     this.onChangeCallback = onChange;
 
     const rebuildWithNotify = () => {
@@ -90,10 +93,9 @@ export class Indexer {
     };
 
     // Debounced rebuild for rapid changes (e.g., editors writing to files).
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const debounced = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(rebuildWithNotify, 100);
+      if (this.debounceTimer) clearTimeout(this.debounceTimer);
+      this.debounceTimer = setTimeout(rebuildWithNotify, 100);
     };
 
     // Walk contentDir and set up recursive file watchers.
@@ -111,6 +113,10 @@ export class Indexer {
     }
     this.fsWatchers = [];
     this.onChangeCallback = null;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
   }
 
   /** Recursively set up fs.watch on directories, watching for .md changes. */

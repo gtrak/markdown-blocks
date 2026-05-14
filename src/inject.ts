@@ -1,7 +1,7 @@
 import { Block, formatBlockId } from "./types.js";
 import * as parse5 from "parse5";
 import { escapeHtml } from "./render.js";
-import { parseHtml as parse5Parse, serialize as parse5Serialize, findCommentAnchors, findElementBySelector, isBlockTag, replaceParent } from "./inject_dom.js";
+import { parseHtml as parse5Parse, serialize as parse5Serialize, findCommentAnchors, findElementBySelector, isBlockTag, replaceParent, insertBefore } from "./inject_dom.js";
 
 /**
  * Build just the inner content (mb-content + mb-bar) without the outer mb-block wrapper.
@@ -225,33 +225,41 @@ function injectHtmxShellsOccurrenceMode(html: string, blocks: Block[], contentSe
  * as an idempotency guard so repeated calls do not produce duplicate banners.
  */
 export function injectUneditableBanner(html: string): string {
-  // Idempotency: skip if already injected
-  if (/data-uneditable-banner\s*=\s*["']1["']/.test(html)) return html;
+  const doc = parse5Parse(html);
+
+  // Idempotency: skip if already injected (check via DOM)
+  const htmlEl = findElementBySelector(doc, "html");
+  if (htmlEl && P5T.getAttrList(htmlEl).some(a => a.name === "data-uneditable-banner")) {
+    return html;
+  }
+
+  // Set idempotency attribute on <html>
+  if (htmlEl) {
+    htmlEl.attrs.push({ name: "data-uneditable-banner", value: "1" });
+  }
 
   const bannerScript = `<script>
-(function(){document.documentElement.setAttribute('data-uneditable-banner','1');var d=document.createElement('div');d.id='mb-uneditable';d.style.cssText='position:fixed;top:0;left:0;right:0;background:#fef3c7;border-bottom:2px solid #f59e0b;color:#92400e;padding:10px 40px 10px 16px;font-size:13px;line-height:1.4;z-index:2147483647;font-family:sans-serif';d.textContent='No markdown source found for this page. Add it to your contentDir or define a pathMap entry in markdown-blocks.config.ts.';var b=document.createElement('button');b.textContent='\\u00d7';b.style.cssText='position:absolute;top:8px;right:12px;border:none;background:transparent;font-size:18px;cursor:pointer;color:#92400e';b.onclick=function(){document.body.removeChild(d)};d.appendChild(b);document.body.insertBefore(d,document.body.firstChild)})();
+(function(){document.documentElement.setAttribute('data-uneditable-banner','1');var d=document.createElement('div');d.id='mb-uneditable';d.style.cssText='position:fixed;top:0;left:0;right:0;background:#fef3c7;border-bottom:2px solid #f59e0b;color:#92400e;padding:10px 40px 10px 16px;font-size:13px;line-height:1.4;z-index:2147483647;font-family:sans-serif';d.textContent='No markdown source found for this page. Add it to your contentDir or define a pathMap entry in markdown-blocks.config.ts.';var b=document.createElement('button');b.textContent='\u00d7';b.style.cssText='position:absolute;top:8px;right:12px;border:none;background:transparent;font-size:18px;cursor:pointer;color:#92400e';b.onclick=function(){document.body.removeChild(d)};d.appendChild(b);document.body.insertBefore(d,document.body.firstChild)})();
 <\/script>`;
 
-  // Set the data attribute on <html> for static idempotency detection
-  let result = html.replace(/(<html\b)/i, '$1 data-uneditable-banner="1"');
-
   // Insert near top of <body>
-  const bodyRe = /<body[^>]*>/i;
-  const match = result.match(bodyRe);
-  if (match) {
-    return result.slice(0, match.index! + match[0].length) + bannerScript + result.slice(match.index! + match[0].length);
+  const body = findElementBySelector(doc, "body");
+  if (body) {
+    const fragment = parse5.parseFragment(bannerScript);
+    const firstChild = P5T.getChildNodes(body)[0];
+    if (firstChild) {
+      for (const child of P5T.getChildNodes(fragment)) {
+        insertBefore(body, child, firstChild);
+      }
+    } else {
+      for (const child of P5T.getChildNodes(fragment)) {
+        P5T.appendChild(body, child);
+      }
+    }
   }
 
-  // Fallback: insert before closing </html> or at end of document
-  const htmlCloseRe = /<\/html>/i;
-  const closeMatch = result.match(htmlCloseRe);
-  if (closeMatch) {
-    return result.slice(0, closeMatch.index!) + bannerScript + result.slice(closeMatch.index!);
-  }
-
-  return result + "\n" + bannerScript;
+  return parse5Serialize(doc);
 }
-
 
 
 /** CSS styles for the markdown-blocks editing UI, injected before </head>. */
@@ -273,7 +281,10 @@ const HTMX_CLIENT_CSS = `<style>
 </style>`;
 
 /** htmx CDN script, injected before </head>. */
-const HTMX_CLIENT_SCRIPT = `<script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>`;
+const HTMX_CLIENT_SCRIPT_CDN = `<script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>`;
+
+/** htmx bundled script (local), injected before </head>. */
+const HTMX_CLIENT_SCRIPT_BUNDLED = `<script src="/htmx.min.js"></script>`;
 
 /** Standalone client module, injected just before </body>. */
 const HTMX_CLIENT_BODY = `<script type="module" src="/mb-client.js"></script>`;
@@ -283,35 +294,39 @@ const HTMX_CLIENT_BODY = `<script type="module" src="/mb-client.js"></script>`;
  * the raw HTML response from the upstream SSG.  Idempotent: safe to call
  * on already-injected HTML.
  */
-export function injectHtmxClient(html: string): string {
-  // Idempotency guard — skip if already processed
+export function injectHtmxClient(html: string, htmxSource: "cdn" | "bundled" = "cdn"): string {
+  const script = htmxSource === "bundled" ? HTMX_CLIENT_SCRIPT_BUNDLED : HTMX_CLIENT_SCRIPT_CDN;
+
+  // Fast idempotency guard — skip if already processed
   if (html.includes("data-mb-client")) return html;
 
-  let result = html;
+  const doc = parse5Parse(html);
 
-  // Inject CSS + htmx script before </head> (or before <body> if no </head>)
-  const headClose = result.indexOf("</head>");
-  const bodyOpen = result.match(/<body[^>]*>/)?.index ?? -1;
+  // Find <html>, <head>, <body> elements
+  const htmlEl = findElementBySelector(doc, "html");
+  const head = findElementBySelector(doc, "head");
+  const body = findElementBySelector(doc, "body");
 
-  const injection = HTMX_CLIENT_SCRIPT + "\n" + HTMX_CLIENT_CSS;
-  if (headClose !== -1) {
-    result = result.slice(0, headClose) + injection + "\n" + result.slice(headClose);
-  } else if (bodyOpen !== -1) {
-    result = result.slice(0, bodyOpen) + injection + "\n" + result.slice(bodyOpen);
-  } else {
-    result = injection + "\n" + result;
+  // Set idempotency attribute on <html>
+  if (htmlEl) {
+    htmlEl.attrs.push({ name: "data-mb-client", value: "1" });
   }
 
-  // Mark as injected via <html> attribute (idempotent guard)
-  result = result.replace(/(<html\b)/i, '$1 data-mb-client="1"');
-
-  // Inject save-indicator before </body> (or at end)
-  const bodyClose = result.indexOf("</body>");
-  if (bodyClose !== -1) {
-    result = result.slice(0, bodyClose) + HTMX_CLIENT_BODY + "\n" + result.slice(bodyClose);
-  } else {
-    result = result + "\n" + HTMX_CLIENT_BODY;
+  // Inject CSS + htmx script into <head>
+  if (head) {
+    const headInjection = parse5.parseFragment(script + "\n" + HTMX_CLIENT_CSS);
+    for (const child of P5T.getChildNodes(headInjection)) {
+      P5T.appendChild(head, child);
+    }
   }
 
-  return result;
+  // Inject save-indicator script into <body> (at end)
+  if (body) {
+    const bodyInjection = parse5.parseFragment(HTMX_CLIENT_BODY);
+    for (const child of P5T.getChildNodes(bodyInjection)) {
+      P5T.appendChild(body, child);
+    }
+  }
+
+  return parse5Serialize(doc);
 }

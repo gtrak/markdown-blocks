@@ -1,13 +1,13 @@
-import fs from "node:fs";
 import path from "node:path";
 import { Config, parseBlockId, formatBlockId } from "./types.js";
-import { replaceBlock, deleteBlock, insertBlock, moveBlock, moveBlockByDirection, parseBlocks } from "./ast.js";
-import { deannotate, annotate } from "./annotate.js";
+import { parseBlocks } from "./ast.js";
+import { deannotate } from "./annotate.js";
 import { Indexer } from "./indexer.js";
+import { MarkdownService } from "./markdown-service.js";
 import { buildHtmxShell, buildHtmxContentInner } from "./inject.js";
 import { renderBlock, escapeHtml } from "./render.js";
 
-// --- Helper exports for testing ---
+// --- HTTP helpers ---
 
 /** Standard CORS headers */
 export function corsHeaders(): Record<string, string> {
@@ -34,29 +34,8 @@ function htmlResponse(status: number, body: string): Response {
   });
 }
 
-// --- Save body type ---
-
-export interface SaveBody {
-  path?: string;
-  filepath?: string;
-  action?: "edit" | "insert" | "delete" | "move";
-  blockId?: string;
-  afterBlockId?: string;   // insert destination
-  beforeBlockId?: string;  // move destination (null = end)
-  tag?: string;            // insert type: "h1", "h2", "p", etc.
-  text?: string;
-  direction?: "up" | "down";
-}
-
-// --- Security helpers ---
-
-/** Check if a resolved absolute path lives inside the given directory */
-function isInsideDir(filepath: string, dir: string): boolean {
-  const absFile = path.resolve(filepath);
-  const absDir = path.resolve(dir);
-  // Ensure dir ends with separator to avoid prefix collisions like /tmp/foo matching /tmp/foobar
-  return absFile.startsWith(absDir + path.sep) || absFile === absDir;
-}
+// --- Save body type (re-exported for consumers) ---
+export type { SaveBody } from "./markdown-service.js";
 
 // --- Parse form body for htmx requests ---
 
@@ -98,11 +77,11 @@ function formParamsToSaveBody(params: URLSearchParams): SaveBody {
   };
 }
 
-// --- Main handler ---
+// --- Main save handler ---
 
 /**
- * Fetch-compatible save handler. Replaces a single block in a markdown file
- * using AST position-aware replacement.
+ * Fetch-compatible save handler. Delegates file I/O and AST mutations to
+ * MarkdownService; handles only HTTP concerns (parsing, response formatting).
  */
 export async function handleSave(
   req: Request,
@@ -128,74 +107,48 @@ export async function handleSave(
   }
 
   const action = body.action || "edit";
+  const service = new MarkdownService(config, indexer);
 
-  // --- Resolve filepath ---
-  const contentDir = path.resolve(config.contentDir);
+  // --- Resolve filepath via service ---
+  const fileResult = service.resolveFile(body);
+  if ("error" in fileResult) {
+    return jsonResponse(fileResult.error.status, { ok: false, msg: fileResult.error.msg });
+  }
+  const filepath = fileResult.filepath;
 
-  let filepath: string;
-  if (body.filepath) {
-    const resolved = path.resolve(body.filepath);
-    if (!isInsideDir(resolved, contentDir)) {
-      return jsonResponse(403, { ok: false, msg: "Path outside contentDir" });
-    }
-    filepath = resolved;
-  } else if (body.path) {
-    const resolved = indexer.resolve(body.path);
-    if (!resolved) {
-      return jsonResponse(404, { ok: false, msg: `Path not found` });
-    }
-    if (!isInsideDir(resolved, contentDir)) {
-      return jsonResponse(403, { ok: false, msg: "Path outside contentDir" });
-    }
-    filepath = resolved;
-  } else {
-    return jsonResponse(400, { ok: false, msg: "Missing path or filepath" });
+  // --- Read source file via service ---
+  const readResult = service.readDeannotated(filepath);
+  if ("error" in readResult) {
+    return jsonResponse(readResult.error.status, { ok: false, msg: readResult.error.msg });
   }
 
-  // --- Read source file ---
-  let content: string;
-  try {
-    content = fs.readFileSync(filepath, "utf-8");
-  } catch {
-    return jsonResponse(404, { ok: false, msg: `File not found` });
-  }
-
-  // --- Sanitize text ---
+  const cleanContent = readResult.content;
   let newText = body.text ?? "";
-
 
   // --- Route mutation by action ---
   let mutationResult: { result: string; success?: boolean };
-  const cleanContent = deannotate(content);
 
   if (action === "edit") {
     if (!body.blockId) return jsonResponse(400, { ok: false, msg: "Missing blockId" });
-    const parsedId = parseBlockId(body.blockId);
-    if (!parsedId) return jsonResponse(400, { ok: false, msg: "Invalid blockId" });
-    const r = replaceBlock(cleanContent, parsedId, newText);
-    mutationResult = { result: r.result, success: r.success };
+    const r = service.edit(cleanContent, body.blockId, newText);
+    if ("error" in r) return jsonResponse(r.error.status, { ok: false, msg: r.error.msg });
+    mutationResult = r;
   } else if (action === "delete") {
     if (!body.blockId) return jsonResponse(400, { ok: false, msg: "Missing blockId" });
-    const parsedId = parseBlockId(body.blockId);
-    if (!parsedId) return jsonResponse(400, { ok: false, msg: "Invalid blockId" });
-    mutationResult = deleteBlock(cleanContent, parsedId);
+    const r = service.del(cleanContent, body.blockId);
+    if ("error" in r) return jsonResponse(r.error.status, { ok: false, msg: r.error.msg });
+    mutationResult = r;
   } else if (action === "insert") {
     if (!body.afterBlockId) return jsonResponse(400, { ok: false, msg: "Missing afterBlockId" });
-    const afterId = parseBlockId(body.afterBlockId);
-    if (!afterId) return jsonResponse(400, { ok: false, msg: "Invalid afterBlockId" });
     if (!body.tag) return jsonResponse(400, { ok: false, msg: "Missing tag" });
-    mutationResult = insertBlock(cleanContent, afterId, body.tag, newText);
+    const r2 = service.insert(cleanContent, body.afterBlockId, body.tag, newText);
+    if ("error" in r2) return jsonResponse(r2.error.status, { ok: false, msg: r2.error.msg });
+    mutationResult = r2;
   } else if (action === "move") {
     if (!body.blockId) return jsonResponse(400, { ok: false, msg: "Missing blockId" });
-    const parsedId = parseBlockId(body.blockId);
-    if (!parsedId) return jsonResponse(400, { ok: false, msg: "Invalid blockId" });
-
-    if (body.direction) {
-      mutationResult = moveBlockByDirection(cleanContent, parsedId, body.direction);
-    } else {
-      const beforeId = body.beforeBlockId != null && body.beforeBlockId !== "" ? parseBlockId(body.beforeBlockId) : null;
-      mutationResult = moveBlock(cleanContent, parsedId, beforeId);
-    }
+    const r3 = service.move(cleanContent, body.blockId, body.direction || undefined, body.beforeBlockId || undefined);
+    if ("error" in r3) return jsonResponse(r3.error.status, { ok: false, msg: r3.error.msg });
+    mutationResult = r3;
   } else {
     return jsonResponse(400, { ok: false, msg: "Unknown action" });
   }
@@ -203,27 +156,18 @@ export async function handleSave(
   if (!mutationResult.success) {
     return jsonResponse(400, { ok: false, msg: `${action} failed: block not found` });
   }
-  const annotated = annotate(mutationResult.result);
 
-  // --- Atomic write ---
-  const tmpPath = filepath + ".tmp";
-  try {
-    fs.writeFileSync(tmpPath, annotated, "utf-8");
-    fs.renameSync(tmpPath, filepath);
-  } catch (err) {
-    // Clean up temp file on failure
-    try {
-      fs.unlinkSync(tmpPath);
-    } catch { /* ignore */ }
-    return jsonResponse(500, { ok: false, msg: `Write failed: ${String(err)}` });
+  // --- Atomic write via service ---
+  const writeResult = service.mutateAndWrite(filepath, cleanContent, mutationResult.result);
+  if ("error" in writeResult) {
+    return jsonResponse(writeResult.error.status, { ok: false, msg: writeResult.error.msg });
   }
 
-  // --- HTMX response ---
+  // --- HTMX response formatting (presentation concern — stays in controller) ---
   if (isHtmx) {
-    const newClean = deannotate(annotated);
+    const newClean = deannotate(writeResult.annotated);
 
-   if (action === "move") {
-      // Move is handled client-side (DOM rearrangement). Just return success.
+    if (action === "move") {
       return jsonResponse(200, { ok: true });
     }
 
@@ -231,13 +175,12 @@ export async function handleSave(
       return htmlResponse(200, "");
     }
 
-    // edit / insert: wrap just the changed block
+    // insert: compose and render the new block
     if (action === "insert") {
-      const afterParsed = parseBlockId(body.afterBlockId!);
+      const afterParsed = parseBlockId(body.afterBlockId);
       const pagePath = body.path || body.filepath || "";
-
-      // Insert: compose markdown for the new block, render via renderBlock
       const tag = body.tag || "p";
+
       let newMd: string;
       if (tag === "ul") {
         const items = newText.split(",").map(s => s.trim()).filter(Boolean);
@@ -249,29 +192,25 @@ export async function handleSave(
         const depth = Math.min(parseInt(tag.slice(1), 10) || 2, 6);
         newMd = "#".repeat(depth) + " " + newText + "\n";
       } else {
-        newMd = newText + "\n"; // p, blockquote, etc.
+        newMd = newText + "\n";
       }
+
       const innerHtml = renderBlock(newMd);
-      // Block ID: find the newly inserted block among all parsed blocks.
-      // It's the first block of this tag type that comes after the insertion point.
       const blocks = parseBlocks(newClean);
       let foundAfter = false;
       let bid: string | undefined;
       for (const b of blocks) {
         if (!foundAfter) {
-          // Walk forward until we find the insertion target
           const fbid = formatBlockId({ tag: b.tag, index: b.index });
           if (fbid === (body.afterBlockId || "")) foundAfter = true;
           continue;
         }
-        // First block of matching tag after the insertion point = our new block
         if (b.tag === tag) {
           bid = formatBlockId({ tag: b.tag, index: b.index });
           break;
         }
       }
       if (!bid) {
-        // Fallback: max index + 1 for this tag
         const maxIdx = blocks.filter(b => b.tag === tag).reduce((m, b) => Math.max(m, b.index), -1);
         bid = formatBlockId({ tag, index: maxIdx + 1 });
       }
@@ -279,13 +218,13 @@ export async function handleSave(
       return htmlResponse(200, buildHtmxShell(bid, innerHtml, isList, pagePath));
     }
 
-    const parsedBlockId = parseBlockId(body.blockId!);
-
-    // Block edits: find the target and render it
+    // edit: find and render target block
+    const parsedBlockId = parseBlockId(body.blockId);
+    if (!parsedBlockId) return jsonResponse(400, { ok: false, msg: "Invalid blockId" });
     const blocks = parseBlocks(newClean);
     const targetBlock = blocks.find(b =>
-      b.tag === parsedBlockId!.tag &&
-      b.index === parsedBlockId!.index
+      b.tag === parsedBlockId.tag &&
+      b.index === parsedBlockId.index
     );
 
     if (targetBlock) {
@@ -297,7 +236,6 @@ export async function handleSave(
       const rendered = renderBlock(blockMd);
       const bid = formatBlockId({ tag: targetBlock.tag, index: targetBlock.index });
       const isList = ["ul", "ol"].includes(targetBlock.tag);
-
       return htmlResponse(200, buildHtmxContentInner(bid, rendered, pagePath));
     }
   }
@@ -306,11 +244,11 @@ export async function handleSave(
   return jsonResponse(200, { ok: true, msg: msgMap[action] });
 }
 
-// --- Source endpoint ---
+// --- Source endpoint handler ---
 
 /**
  * Source endpoint handler: returns a <textarea> HTML snippet containing
- * the raw markdown for the specified block. Called via htmx GET /source.
+ * the raw markdown for the specified block. Delegates file I/O to MarkdownService.
  */
 export async function handleSource(
   req: Request,
@@ -319,7 +257,6 @@ export async function handleSource(
 ): Promise<Response> {
   const isHtmx = req.headers.get("HX-Request") === "true";
 
-  // Parse query params (htmx sends blockId and path via hx-vals)
   const url = new URL(req.url);
   const blockId = url.searchParams.get("blockId");
   const pagePath = url.searchParams.get("path");
@@ -328,58 +265,28 @@ export async function handleSource(
     return jsonResponse(400, { ok: false, msg: "Missing blockId or path" });
   }
 
-  // --- Resolve filepath (same security logic as handleSave) ---
-  const contentDir = path.resolve(config.contentDir);
+  const service = new MarkdownService(config, indexer);
 
-  let filepath: string;
-  const resolved = indexer.resolve(pagePath);
-  if (!resolved) {
-    return jsonResponse(404, { ok: false, msg: "Path not found" });
+  // Resolve filepath
+  const fileResult = service.resolveFile({ path: pagePath });
+  if ("error" in fileResult) {
+    return jsonResponse(fileResult.error.status, { ok: false, msg: fileResult.error.msg });
   }
-  if (!isInsideDir(resolved, contentDir)) {
-    return jsonResponse(403, { ok: false, msg: "Path outside contentDir" });
-  }
-  filepath = resolved;
+  const filepath = fileResult.filepath;
 
-  // --- Read source file ---
-  let content: string;
-  try {
-    content = fs.readFileSync(filepath, "utf-8");
-  } catch {
-    return jsonResponse(404, { ok: false, msg: "File not found" });
+  // Read raw block content
+  const blockResult = service.readRawBlock(filepath, blockId);
+  if ("error" in blockResult) {
+    return jsonResponse(blockResult.error.status, { ok: false, msg: blockResult.error.msg });
   }
 
-  // --- Find target block and extract raw markdown ---
-  const cleanContent = deannotate(content);
-  const blocks = parseBlocks(cleanContent);
-  const parsedId = parseBlockId(blockId);
-  if (!parsedId) {
-    return jsonResponse(400, { ok: false, msg: "Invalid blockId" });
-  }
-
-  const targetBlock = blocks.find(
-    b => b.tag === parsedId.tag && b.index === parsedId.index
-  );
-  if (!targetBlock) {
-    return jsonResponse(404, { ok: false, msg: "Block not found" });
-  }
-
-  // Extract raw markdown lines from source positions
-  const lines = cleanContent.split("\n");
-  const contentStart = targetBlock.position.start.line - 1;
-  const contentEnd = targetBlock.position.end.line;
-  const blockMd = lines.slice(contentStart, contentEnd).join("\n");
-
-  // Escape the markdown for safe embedding in HTML
-  const escapedMd = escapeHtml(blockMd);
-
-  // Return HTML snippet with textarea
+  const escapedMd = escapeHtml(blockResult.raw);
   const html = `
 <div class=\"mb-edit\">
   <input type=\"hidden\" name=\"blockId\" value=\"${blockId}\">
   <input type=\"hidden\" name=\"path\" value=\"${pagePath}\">
 <textarea class=\"mb-source\" name=\"text\"
-             autofocus>
+              autofocus>
 ${escapedMd}</textarea>
 
 </div>`;
@@ -387,6 +294,5 @@ ${escapedMd}</textarea>
   if (isHtmx) {
     return htmlResponse(200, html);
   }
-
   return jsonResponse(200, { ok: true, html });
 }

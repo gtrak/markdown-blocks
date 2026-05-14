@@ -110,7 +110,7 @@ beforeAll(async () => {
     trailingSlash: true,
   };
 
-  const handler = createSaveHandler(cfg);
+  const { handler } = createSaveHandler(cfg);
 
   Bun.serve({
     port: SAVE_SERVER_PORT,
@@ -164,11 +164,11 @@ describe("Integration: full save-server proxy + browser", () => {
     const blocks = await page.$$eval(".mb-block", (els) => els.length);
     expect(blocks).toBe(4);
 
-    // Check htmx client script executed
-    const scriptExecuted = await page.evaluate(() =>
-      (window as any).__scriptExecuted
+    // Check save indicator element exists (confirms client script ran)
+    const indicatorExists = await page.evaluate(() =>
+      !!document.getElementById("save-indicator")
     );
-    expect(scriptExecuted).toBe(true);
+    expect(indicatorExists).toBe(true);
 
     await page.close();
   });
