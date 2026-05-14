@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ config.title }}{% endblock title %}
+{% block content %}
+  {{ section.content | safe }}
+  <h2>Posts</h2>
+  {% for page in section.pages %}
+  <div class="post-item">
+    <a href="{{ page.permalink }}">{{ page.title }}</a>
+  </div>
+  {% endfor %}
+{% endblock content %}

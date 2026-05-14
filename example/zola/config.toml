@@ -1,0 +1,6 @@
+base_url = "http://localhost:1111/"
+title = "Markdown Blocks Demo"
+default_language = "en"
+
+[extra]
+description = "Demo site using markdown-blocks editor with Zola"

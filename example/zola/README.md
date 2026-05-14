@@ -1,46 +1,45 @@
-# Markdown Blocks — Hugo Demo
+# Markdown Blocks — Zola Demo
 
-This is a minimal Hugo project configured with markdown-blocks inline editing.
+This is a minimal Zola project configured with markdown-blocks inline editing.
 
 ## Prerequisites
 
-- [Hugo](https://gohugo.io/) installed
+- [Zola](https://www.getzola.org/) installed
 - Bun runtime (for the save server)
 
 ## Quick Start
 
 ```bash
-# Terminal 1: Start Hugo's dev server
-hugo server --port 1313
+# Terminal 1: Start Zola's dev server
+zola serve --port 1111
 
 # Terminal 2: Start markdown-blocks save server
 bunx markdown-blocks-server \
   --content-dir content \
-  --preset hugo \
-  --proxy http://localhost:1313 \
-  --port 8765
+  --preset zola \
+  --proxy http://localhost:1111 \
+  --port 9999
 ```
 
-Then browse to **http://localhost:8765/** — this is the markdown-blocks proxy, not Hugo directly.
+Then browse to **http://localhost:9999/** — this is the markdown-blocks proxy, not Zola directly.
 
 ## How It Works
 
-1. Your browser requests pages from port 8765 (save server)
-2. The save server proxies each request to Hugo on port 1313
+1. Your browser requests pages from port 9999 (save server)
+2. The save server proxies each request to Zola on port 1111
 3. On the response, it injects HTMX-powered edit shells around each markdown block
 4. When you edit and click away, the save server writes changes back to `content/`
-5. Hugo picks up the file changes and re-renders (livereload)
+5. Zola picks up the file changes and re-renders
 
 ## File Structure
 
 ```
-example/hugo/
-├── hugo.toml          # Hugo configuration
-├── layouts/           # Hugo templates
+example/zola/
+├── config.toml        # Zola configuration
+├── templates/         # Tera templates
+│   ├── base.html      # Base layout
 │   ├── index.html     # Home page template
-│   └── _default/
-│       ├── baseof.html  # Base layout
-│       └── single.html  # Single page layout
+│   └── page.html      # Single page template
 ├── content/           # Your markdown files (what you'll edit)
 │   ├── _index.md      # Home page content
 │   └── blog/

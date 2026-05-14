@@ -78,6 +78,34 @@ Bun.serve({ port: 9999, fetch: handler });
 
 Run `bun install` and Bun resolves the git URL automatically, pinning to a commit hash in `bun.lock`.
 
+## Examples
+
+Both examples use the CLI only — no custom TypeScript needed. Each demo site runs with two terminals: one for your SSG dev server, one for the markdown-blocks save server.
+
+### Hugo
+
+```bash
+# Terminal 1
+hugo server --port 1313
+
+# Terminal 2
+bunx markdown-blocks-server --content-dir content --preset hugo --proxy http://localhost:1313 --port 8765
+```
+
+Browse to **http://localhost:8765/** — see `example/hugo/` for details.
+
+### Zola
+
+```bash
+# Terminal 1
+zola serve --port 1111
+
+# Terminal 2
+bunx markdown-blocks-server --content-dir content --preset zola --proxy http://localhost:1111 --port 9999
+```
+
+Browse to **http://localhost:9999/** — see `example/zola/` for details.
+
 ## Client injection (automatic)
 
 You do **not** need to add any client code to your templates. The server injects everything:
