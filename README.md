@@ -147,3 +147,130 @@ Setting `text` to an empty string deletes the block cleanly (heading + underline
 | `blockId` | string | Block ID like "h1-L2" (for block-level save) |
 | `text` | string | New block text (with blockId, empty = delete) |
 | `content` | string | Full HTML content (without blockId, writes to source) |
+
+## Live editing workflow
+
+The live editing session follows a clear setup → edit → teardown lifecycle. The server handles annotation and cleanup automatically.
+
+### Session lifecycle
+
+```
+┌───────────── SETUP ─────────────┐
+│ 1. Start your SSG dev server    │
+│ 2. Start save server as proxy   │
+│    (auto-annotates content .md)  │
+│ 3. Browse to save server URL    │
+├──────────── EDITING ────────────┤
+│ • Click any block → edit mode   │
+│ • Toolbar: insert, delete, move │
+│ • Blur or Save button → persist │
+│ • Reload page = instant refresh │
+├─────────── TEARDOWN ────────────┤
+│ 1. Stop save server (Ctrl+C)    │
+│    (auto-deannotates content)   │
+│ 2. Stop SSG dev server          │
+│ 3. Content is clean .md again   │
+└─────────────────────────────────┘
+```
+
+### What "annotation" means
+
+On startup, the save server walks `contentDir` and injects comment anchors like `<!-- markdown-blocks:h1-0 -->` before each top-level block. These anchors let the server map HTML elements back to source file line numbers on every save.
+
+On shutdown, all anchors are stripped — your `.md` files are left clean. If the server crashes, the next startup deannotates first before re-annotating.
+
+### Step-by-step for Zola (typical example)
+
+```bash
+# Step 1: Start SSG (terminal A)
+zola serve --port 1111
+
+# Step 2: Start save server (terminal B)
+bunx markdown-blocks-server \
+  --content-dir content \
+  --preset zola \
+  --proxy http://localhost:1111 \
+  --port 9999
+
+# Step 3: Open http://localhost:9999 in browser
+#   → Every block now has a subtle border and edit toolbar
+
+# Editing:
+#   Click a block → it becomes editable
+#   Edit text → changes save to .md on blur
+#   Use toolbar to insert new blocks, delete, or reorder
+
+# Step 4: Done? Ctrl+C the save server
+#   → Annotations are stripped automatically
+#   → Your content/ is clean again
+```
+
+### Agent-assisted setup (Hermes, Claw, etc.)
+
+An AI coding agent can automate the entire setup and teardown. The key parameters it needs are your SSG type and content directory. Typical agent workflow:
+
+```
+Agent receives: "enable live editing for my hugo site"
+   │
+   ▼
+1. Detect SSG from project structure
+     (looks for config.toml, zola.toml, _config.yml)
+   │
+   ▼
+2. Start SSG dev server in background
+     (hugo serve / zola serve)
+   │
+   ▼
+3. Start save server as proxy in background
+     (bunx markdown-blocks-server)
+   │
+   ▼
+4. Report: "Live editing on http://localhost:9999"
+     "Open this URL, click any block to edit"
+   │
+   ▼
+5. On teardown request:
+     Stop save server → annotations cleaned
+     Stop SSG server
+```
+
+The agent doesn't need to manage annotations manually — `createSaveHandler` handles them in its setup and cleanup functions. For programmatic control:
+
+```ts
+import { createSaveHandler } from 'markdown-blocks/server';
+
+// --- SETUP ---
+const backend = Bun.spawn({ cmd: ['zola', 'serve', '--port', '1111'] });
+await sleep(3000); // wait for SSG to start
+
+const { handler, cleanup } = createSaveHandler({
+  contentDir: 'content',
+  preset: 'zola',
+  backendProxyUrl: 'http://localhost:1111',
+});
+
+const server = Bun.serve({ port: 9999, fetch: handler });
+console.log('Live editing: http://localhost:9999');
+
+// --- TEARDOWN (when done) ---
+server.stop();
+cleanup();      // ← strips annotations from content/
+backend.kill();
+```
+
+### Path mapping
+
+If your SSG generates URLs that don't match file paths, use `--path-map`:
+
+```bash
+bunx markdown-blocks-server \
+  --content-dir content \
+  --preset zola \
+  --proxy http://localhost:1111 \
+  --port 9999 \
+  --path-map '{"/":"/_index.md", "/about/":"about.md"}'
+```
+
+The path map tells the save server which URL maps to which content file — required when SSG routing differs from filesystem layout.
+
+## Configuration reference
